@@ -5,6 +5,7 @@ const app = document.getElementById('app');
 const sunToggleInput = document.getElementById('sun-toggle');
 const sunStatus = document.getElementById('sun-status');
 const fullscreenToggleButton = document.getElementById('fullscreen-toggle');
+let pseudoFullscreen = false;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x7ea6bf, 0.0104);
@@ -796,8 +797,23 @@ function setSunEnabled(enabled) {
   if (sunStatus) sunStatus.textContent = enabled ? 'Sun: ON (press L)' : 'Sun: OFF (press L)';
 }
 
-function isFullscreen() {
+function isNativeFullscreen() {
   return !!document.fullscreenElement;
+}
+
+function isFullscreen() {
+  return isNativeFullscreen() || pseudoFullscreen;
+}
+
+function setPseudoFullscreen(enabled) {
+  pseudoFullscreen = enabled;
+  document.body.classList.toggle('pseudo-fullscreen', enabled);
+}
+
+function resizeRenderer() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
 function updateFullscreenButton() {
@@ -806,15 +822,34 @@ function updateFullscreenButton() {
 }
 
 async function toggleFullscreen() {
+  const root = document.documentElement;
+  const requestFullscreen =
+    root.requestFullscreen ||
+    root.webkitRequestFullscreen ||
+    root.webkitEnterFullscreen;
+  const exitFullscreen =
+    document.exitFullscreen ||
+    document.webkitExitFullscreen;
+
   try {
-    if (isFullscreen()) {
-      await document.exitFullscreen();
+    if (isNativeFullscreen()) {
+      if (exitFullscreen) {
+        await exitFullscreen.call(document);
+      } else {
+        setPseudoFullscreen(false);
+      }
+    } else if (pseudoFullscreen) {
+      setPseudoFullscreen(false);
+    } else if (requestFullscreen) {
+      await requestFullscreen.call(root);
     } else {
-      await document.documentElement.requestFullscreen();
+      setPseudoFullscreen(true);
     }
   } catch (error) {
-    console.error('Fullscreen toggle failed:', error);
+    console.error('Fullscreen toggle failed, fallback to pseudo fullscreen:', error);
+    setPseudoFullscreen(!pseudoFullscreen && !isNativeFullscreen());
   } finally {
+    resizeRenderer();
     updateFullscreenButton();
   }
 }
@@ -831,7 +866,13 @@ if (fullscreenToggleButton) {
   });
 }
 
-document.addEventListener('fullscreenchange', updateFullscreenButton);
+document.addEventListener('fullscreenchange', () => {
+  if (!isNativeFullscreen()) {
+    setPseudoFullscreen(false);
+  }
+  resizeRenderer();
+  updateFullscreenButton();
+});
 
 window.addEventListener('keydown', (event) => {
   if (event.key.toLowerCase() === 'l') {
@@ -910,8 +951,4 @@ function animate() {
 }
 animate();
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+window.addEventListener('resize', resizeRenderer);
