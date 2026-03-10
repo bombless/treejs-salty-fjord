@@ -54,6 +54,20 @@
         font-size: 12px;
         opacity: 0.86;
       }
+
+      .hud .row {
+        margin-top: 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+      }
+
+      .hud input[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+        accent-color: #7cc7ff;
+      }
     </style>
   </head>
   <body>
@@ -61,6 +75,11 @@
     <div class="hud">
       <h1>Salty Fjord</h1>
       <p>Drag to orbit, scroll to zoom</p>
+      <div class="row">
+        <input id="sun-toggle" type="checkbox" checked />
+        <label for="sun-toggle">Sun Light</label>
+      </div>
+      <p id="sun-status">Sun: ON (press L)</p>
     </div>
 
     <script type="module" src="./main.js"></script>

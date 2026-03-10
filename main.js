@@ -2,6 +2,8 @@ import * as THREE from './vendor/three.module.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 
 const app = document.getElementById('app');
+const sunToggleInput = document.getElementById('sun-toggle');
+const sunStatus = document.getElementById('sun-status');
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x7ea6bf, 0.0104);
@@ -13,7 +15,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'hi
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.03;
+renderer.toneMappingExposure = 0.96;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -204,7 +206,7 @@ scene.add(hemi);
 const ambientFill = new THREE.AmbientLight(0x93a9bc, 0.16);
 scene.add(ambientFill);
 
-const sun = new THREE.DirectionalLight(0xffd7a0, 2.35);
+const sun = new THREE.DirectionalLight(0xffd7a0, 2.0);
 sun.position.copy(sunAnchor);
 sun.target.position.copy(sunLookAt);
 sun.castShadow = true;
@@ -225,6 +227,27 @@ canyonFill.position.set(-72, 62, 130);
 canyonFill.target.position.set(0, 14, -70);
 scene.add(canyonFill);
 scene.add(canyonFill.target);
+
+const leftRake = new THREE.DirectionalLight(0xffdfbf, 0.34);
+leftRake.position.set(-170, 52, -18);
+leftRake.target.position.set(12, 20, -92);
+scene.add(leftRake);
+scene.add(leftRake.target);
+
+const rightRake = new THREE.DirectionalLight(0x9fb8d3, 0.31);
+rightRake.position.set(165, 56, 4);
+rightRake.target.position.set(-16, 16, -88);
+scene.add(rightRake);
+scene.add(rightRake.target);
+
+const sunRigIntensity = {
+  sun: 2.0,
+  canyonFill: 0.64,
+  leftRake: 0.34,
+  rightRake: 0.31,
+  sunGlow: 1.4
+};
+let sunEnabled = true;
 
 const sunDisk = new THREE.Mesh(
   new THREE.SphereGeometry(8.8, 32, 24),
@@ -504,33 +527,36 @@ terrainMaterial.onBeforeCompile = (shader) => {
 
       float macroRock = fbm(vWorldPos.xz * 0.045);
       float detailRock = fbm(vWorldPos.xz * 0.28 + vec2(macroRock * 3.2, macroRock * 1.6));
+      float microRock = fbm(vWorldPos.xz * 1.15 + vec2(vWorldPos.y * 0.19, -vWorldPos.y * 0.13));
       float strata = sin(vWorldPos.y * 0.82 + macroRock * 7.2 + detailRock * 2.1) * 0.5 + 0.5;
       float crevice = smoothstep(0.53, 0.9, detailRock) * (0.38 + rockSlope * 0.9);
       float ridge = smoothstep(0.56, 0.93, strata) * (0.45 + rockSlope * 0.6);
+      float cavity = smoothstep(0.46, 0.96, detailRock) * (0.22 + rockSlope * 0.8);
 
       vec3 rockCool = vec3(0.79, 0.82, 0.85);
       vec3 rockDark = vec3(0.46, 0.49, 0.52);
       vec3 rockTint = mix(rockCool, rockDark, crevice);
 
-      float albedoMicro = (ridge * 0.16) - (crevice * 0.23) + (macroRock - 0.5) * 0.12;
-      diffuseColor.rgb *= mix(vec3(0.9, 0.92, 0.95), rockTint, 0.44 + rockSlope * 0.4);
-      diffuseColor.rgb *= (0.96 + albedoMicro);
-      diffuseColor.rgb += ridge * 0.068;
-      diffuseColor.rgb *= 1.0 - crevice * 0.14;
+      float albedoMicro = (ridge * 0.22) - (crevice * 0.29) + (macroRock - 0.5) * 0.14 + (microRock - 0.5) * 0.22;
+      diffuseColor.rgb *= mix(vec3(0.92, 0.93, 0.95), rockTint, 0.5 + rockSlope * 0.35);
+      diffuseColor.rgb *= (0.9 + albedoMicro);
+      diffuseColor.rgb += ridge * 0.09;
+      diffuseColor.rgb -= cavity * 0.05;
+      diffuseColor.rgb *= 1.0 - crevice * 0.18;
       `
     )
     .replace(
       '#include <roughnessmap_fragment>',
       `
       #include <roughnessmap_fragment>
-      roughnessFactor = clamp(roughnessFactor + crevice * 0.18 + rockSlope * 0.06 - ridge * 0.08, 0.5, 1.0);
+      roughnessFactor = clamp(roughnessFactor + crevice * 0.2 + cavity * 0.08 + rockSlope * 0.05 - ridge * 0.1 + (1.0 - microRock) * 0.07, 0.46, 1.0);
       `
     )
     .replace(
       '#include <emissivemap_fragment>',
       `
       #include <emissivemap_fragment>
-      totalEmissiveRadiance += vec3(0.017, 0.018, 0.019) * (ridge * 0.34 + (1.0 - crevice) * 0.09);
+      totalEmissiveRadiance += vec3(0.017, 0.018, 0.019) * (ridge * 0.35 + (1.0 - crevice) * 0.11 + (microRock - 0.5) * 0.04);
       `
     );
 
@@ -552,7 +578,8 @@ const water = new THREE.Mesh(
       uDeep: { value: new THREE.Color(0x13364b) },
       uShallow: { value: new THREE.Color(0x3f8da8) },
       uSunDir: { value: new THREE.Vector3(0.05, 0.32, -0.95) },
-      uSunTint: { value: new THREE.Color(0xffcc84) }
+      uSunTint: { value: new THREE.Color(0xffcc84) },
+      uSunStrength: { value: 1.0 }
     },
     vertexShader: `
       uniform float uTime;
@@ -586,6 +613,7 @@ const water = new THREE.Mesh(
       uniform vec3 uShallow;
       uniform vec3 uSunDir;
       uniform vec3 uSunTint;
+      uniform float uSunStrength;
       varying float vWave;
       varying vec2 vUv;
       varying vec3 vWorldPos;
@@ -603,8 +631,8 @@ const water = new THREE.Mesh(
         float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.1);
         float sparkle = spec * (0.25 + sparkleMask * 0.75);
 
-        col += uSunTint * sparkle * 1.3;
-        col += uSunTint * fresnel * 0.14;
+        col += uSunTint * sparkle * 1.3 * uSunStrength;
+        col += uSunTint * fresnel * 0.14 * uSunStrength;
         gl_FragColor = vec4(col, 0.84 * edgeFade + 0.06);
       }
     `
@@ -707,6 +735,40 @@ const sunDust = new THREE.Points(
 );
 scene.add(sunDust);
 
+function setSunEnabled(enabled) {
+  sunEnabled = enabled;
+
+  sun.intensity = enabled ? sunRigIntensity.sun : 0;
+  canyonFill.intensity = enabled ? sunRigIntensity.canyonFill : 0;
+  leftRake.intensity = enabled ? sunRigIntensity.leftRake : 0;
+  rightRake.intensity = enabled ? sunRigIntensity.rightRake : 0;
+  sunGlow.intensity = enabled ? sunRigIntensity.sunGlow : 0;
+
+  sunDisk.visible = enabled;
+  sunHalo.visible = enabled;
+  beams.visible = enabled;
+  sunDust.visible = enabled;
+
+  water.material.uniforms.uSunStrength.value = enabled ? 1.0 : 0.0;
+
+  if (sunToggleInput) sunToggleInput.checked = enabled;
+  if (sunStatus) sunStatus.textContent = enabled ? 'Sun: ON (press L)' : 'Sun: OFF (press L)';
+}
+
+if (sunToggleInput) {
+  sunToggleInput.addEventListener('change', (event) => {
+    setSunEnabled(event.target.checked);
+  });
+}
+
+window.addEventListener('keydown', (event) => {
+  if (event.key.toLowerCase() === 'l') {
+    setSunEnabled(!sunEnabled);
+  }
+});
+
+setSunEnabled(true);
+
 const clock = new THREE.Clock();
 
 function animate() {
@@ -735,18 +797,20 @@ function animate() {
   }
   mistPos.needsUpdate = true;
 
-  const warmShift = 0.16 + Math.sin(t * 0.33) * 0.06;
+  const warmShift = sunEnabled ? 0.16 + Math.sin(t * 0.33) * 0.06 : 0.0;
   mist.material.color.lerpColors(mistCool, mistWarm, warmShift);
 
-  const sunDustPos = sunDust.geometry.attributes.position;
-  for (let i = 0; i < sunDustCount; i += 1) {
-    const idx = i * 3;
-    sunDustPos.array[idx] += sunDustSpeeds[i] * 0.15;
-    sunDustPos.array[idx + 2] += sunDustSpeeds[i] * 0.45;
-    if (sunDustPos.array[idx] > 55) sunDustPos.array[idx] = -55;
-    if (sunDustPos.array[idx + 2] > 60) sunDustPos.array[idx + 2] = -265;
+  if (sunEnabled) {
+    const sunDustPos = sunDust.geometry.attributes.position;
+    for (let i = 0; i < sunDustCount; i += 1) {
+      const idx = i * 3;
+      sunDustPos.array[idx] += sunDustSpeeds[i] * 0.15;
+      sunDustPos.array[idx + 2] += sunDustSpeeds[i] * 0.45;
+      if (sunDustPos.array[idx] > 55) sunDustPos.array[idx] = -55;
+      if (sunDustPos.array[idx + 2] > 60) sunDustPos.array[idx + 2] = -265;
+    }
+    sunDustPos.needsUpdate = true;
   }
-  sunDustPos.needsUpdate = true;
 
   sun.position.set(
     sunAnchor.x + Math.sin(t * 0.08) * 4.8,
@@ -756,7 +820,9 @@ function animate() {
   sunDisk.position.copy(sun.position);
   sunHalo.position.copy(sun.position);
   sunGlow.position.copy(sun.position);
-  sunHalo.material.opacity = 0.72 + Math.sin(t * 0.21) * 0.06;
+  if (sunEnabled) {
+    sunHalo.material.opacity = 0.72 + Math.sin(t * 0.21) * 0.06;
+  }
 
   sunDirection.subVectors(sun.position, sun.target.position).normalize();
   water.material.uniforms.uSunDir.value.copy(sunDirection);
