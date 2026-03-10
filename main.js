@@ -4,7 +4,7 @@ import { OrbitControls } from './vendor/OrbitControls.js';
 const app = document.getElementById('app');
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x7ea6bf, 0.0115);
+scene.fog = new THREE.FogExp2(0x7ea6bf, 0.0104);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1400);
 camera.position.set(52, 42, 115);
@@ -199,8 +199,10 @@ const sunAnchor = new THREE.Vector3(18, 96, -315);
 const sunLookAt = new THREE.Vector3(0, 12, -32);
 const sunDirection = new THREE.Vector3();
 
-const hemi = new THREE.HemisphereLight(0xb8ddf4, 0x31414d, 0.55);
+const hemi = new THREE.HemisphereLight(0xb8ddf4, 0x31414d, 0.74);
 scene.add(hemi);
+const ambientFill = new THREE.AmbientLight(0x93a9bc, 0.16);
+scene.add(ambientFill);
 
 const sun = new THREE.DirectionalLight(0xffd7a0, 2.35);
 sun.position.copy(sunAnchor);
@@ -217,6 +219,12 @@ sun.shadow.bias = -0.00025;
 sun.shadow.normalBias = 0.6;
 scene.add(sun);
 scene.add(sun.target);
+
+const canyonFill = new THREE.DirectionalLight(0xa7bfd6, 0.64);
+canyonFill.position.set(-72, 62, 130);
+canyonFill.target.position.set(0, 14, -70);
+scene.add(canyonFill);
+scene.add(canyonFill.target);
 
 const sunDisk = new THREE.Mesh(
   new THREE.SphereGeometry(8.8, 32, 24),
@@ -409,7 +417,7 @@ const rockTextures = createRockTextures(512);
 terrainMaterial.map = rockTextures.diffuse;
 terrainMaterial.roughnessMap = rockTextures.roughness;
 terrainMaterial.normalMap = rockTextures.normal;
-terrainMaterial.normalScale = new THREE.Vector2(0.85, 0.85);
+terrainMaterial.normalScale = new THREE.Vector2(1.15, 1.15);
 
 let terrainShader = null;
 terrainMaterial.onBeforeCompile = (shader) => {
@@ -504,16 +512,25 @@ terrainMaterial.onBeforeCompile = (shader) => {
       vec3 rockDark = vec3(0.46, 0.49, 0.52);
       vec3 rockTint = mix(rockCool, rockDark, crevice);
 
-      diffuseColor.rgb *= mix(vec3(0.9, 0.92, 0.95), rockTint, 0.36 + rockSlope * 0.42);
-      diffuseColor.rgb += ridge * 0.055;
-      diffuseColor.rgb *= 1.0 - crevice * 0.16;
+      float albedoMicro = (ridge * 0.16) - (crevice * 0.23) + (macroRock - 0.5) * 0.12;
+      diffuseColor.rgb *= mix(vec3(0.9, 0.92, 0.95), rockTint, 0.44 + rockSlope * 0.4);
+      diffuseColor.rgb *= (0.96 + albedoMicro);
+      diffuseColor.rgb += ridge * 0.068;
+      diffuseColor.rgb *= 1.0 - crevice * 0.14;
       `
     )
     .replace(
       '#include <roughnessmap_fragment>',
       `
       #include <roughnessmap_fragment>
-      roughnessFactor = clamp(roughnessFactor + crevice * 0.16 + rockSlope * 0.08 - ridge * 0.06, 0.56, 1.0);
+      roughnessFactor = clamp(roughnessFactor + crevice * 0.18 + rockSlope * 0.06 - ridge * 0.08, 0.5, 1.0);
+      `
+    )
+    .replace(
+      '#include <emissivemap_fragment>',
+      `
+      #include <emissivemap_fragment>
+      totalEmissiveRadiance += vec3(0.017, 0.018, 0.019) * (ridge * 0.34 + (1.0 - crevice) * 0.09);
       `
     );
 
