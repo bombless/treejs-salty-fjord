@@ -4,6 +4,7 @@ import { OrbitControls } from './vendor/OrbitControls.js';
 const app = document.getElementById('app');
 const sunToggleInput = document.getElementById('sun-toggle');
 const sunStatus = document.getElementById('sun-status');
+const fullscreenToggleButton = document.getElementById('fullscreen-toggle');
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x7ea6bf, 0.0104);
@@ -795,19 +796,55 @@ function setSunEnabled(enabled) {
   if (sunStatus) sunStatus.textContent = enabled ? 'Sun: ON (press L)' : 'Sun: OFF (press L)';
 }
 
+function isFullscreen() {
+  return !!document.fullscreenElement;
+}
+
+function updateFullscreenButton() {
+  if (!fullscreenToggleButton) return;
+  fullscreenToggleButton.textContent = isFullscreen() ? 'Exit Fullscreen' : 'Enter Fullscreen';
+}
+
+async function toggleFullscreen() {
+  try {
+    if (isFullscreen()) {
+      await document.exitFullscreen();
+    } else {
+      await document.documentElement.requestFullscreen();
+    }
+  } catch (error) {
+    console.error('Fullscreen toggle failed:', error);
+  } finally {
+    updateFullscreenButton();
+  }
+}
+
 if (sunToggleInput) {
   sunToggleInput.addEventListener('change', (event) => {
     setSunEnabled(event.target.checked);
   });
 }
 
+if (fullscreenToggleButton) {
+  fullscreenToggleButton.addEventListener('click', () => {
+    toggleFullscreen();
+  });
+}
+
+document.addEventListener('fullscreenchange', updateFullscreenButton);
+
 window.addEventListener('keydown', (event) => {
   if (event.key.toLowerCase() === 'l') {
     setSunEnabled(!sunEnabled);
   }
+
+  if (event.key.toLowerCase() === 'f') {
+    toggleFullscreen();
+  }
 });
 
 setSunEnabled(true);
+updateFullscreenButton();
 
 const clock = new THREE.Clock();
 
