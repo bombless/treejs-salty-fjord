@@ -442,8 +442,11 @@ const rockTextures = createRockTextures(512);
 const rockTriSettings = {
   scale: 0.115,
   blendSharpness: 5.2,
-  albedoStrength: 0.84,
-  roughnessStrength: 0.88
+  albedoStrength: 1.08,
+  roughnessStrength: 0.9,
+  detailStrength: 0.34,
+  cavityStrength: 0.2,
+  ridgeStrength: 0.12
 };
 
 let terrainShader = null;
@@ -457,6 +460,9 @@ terrainMaterial.onBeforeCompile = (shader) => {
   shader.uniforms.uRockBlendSharpness = { value: rockTriSettings.blendSharpness };
   shader.uniforms.uRockAlbedoStrength = { value: rockTriSettings.albedoStrength };
   shader.uniforms.uRockRoughnessStrength = { value: rockTriSettings.roughnessStrength };
+  shader.uniforms.uRockDetailStrength = { value: rockTriSettings.detailStrength };
+  shader.uniforms.uRockCavityStrength = { value: rockTriSettings.cavityStrength };
+  shader.uniforms.uRockRidgeStrength = { value: rockTriSettings.ridgeStrength };
 
   shader.vertexShader = shader.vertexShader
     .replace(
@@ -491,6 +497,9 @@ terrainMaterial.onBeforeCompile = (shader) => {
       uniform float uRockBlendSharpness;
       uniform float uRockAlbedoStrength;
       uniform float uRockRoughnessStrength;
+      uniform float uRockDetailStrength;
+      uniform float uRockCavityStrength;
+      uniform float uRockRidgeStrength;
       varying vec3 vWorldPos;
       varying vec3 vWorldNormal;
 
@@ -578,27 +587,48 @@ terrainMaterial.onBeforeCompile = (shader) => {
       vec3 rockDark = vec3(0.46, 0.49, 0.52);
       vec3 rockTint = mix(rockCool, rockDark, crevice);
 
-      float albedoMicro = (ridge * 0.22) - (crevice * 0.29) + (macroRock - 0.5) * 0.14 + (microRock - 0.5) * 0.22;
+      float albedoMicro =
+        ridge * uRockRidgeStrength
+        - crevice * uRockCavityStrength
+        + (macroRock - 0.5) * (0.12 + uRockDetailStrength * 0.12)
+        + (microRock - 0.5) * (0.18 + uRockDetailStrength * 0.18);
+      float cavityShade = crevice * (0.08 + uRockCavityStrength * 0.22) + cavity * (0.04 + uRockCavityStrength * 0.12);
+      float ridgeLift = ridge * (0.04 + uRockRidgeStrength * 0.18);
+      float slopePresence = smoothstep(0.12, 0.9, rockSlope);
+
       diffuseColor.rgb *= mix(vec3(1.0), triAlbedoContrast, uRockAlbedoStrength);
-      diffuseColor.rgb *= mix(vec3(0.92, 0.93, 0.95), rockTint, 0.5 + rockSlope * 0.35);
-      diffuseColor.rgb *= (0.9 + albedoMicro);
-      diffuseColor.rgb += ridge * 0.09;
-      diffuseColor.rgb -= cavity * 0.05;
-      diffuseColor.rgb *= 1.0 - crevice * 0.18;
+      diffuseColor.rgb *= mix(vec3(0.92, 0.93, 0.95), rockTint, 0.42 + rockSlope * 0.42);
+      diffuseColor.rgb *= 1.0 + albedoMicro * (0.55 + slopePresence * 0.45);
+      diffuseColor.rgb += vec3(ridgeLift);
+      diffuseColor.rgb -= vec3(cavityShade);
+      diffuseColor.rgb *= 1.0 - crevice * (0.08 + uRockCavityStrength * 0.18);
       `
     )
     .replace(
       '#include <roughnessmap_fragment>',
       `
       #include <roughnessmap_fragment>
-      roughnessFactor = clamp(mix(roughnessFactor, triRough, uRockRoughnessStrength) + crevice * 0.2 + cavity * 0.08 + rockSlope * 0.05 - ridge * 0.1 + (1.0 - microRock) * 0.07, 0.46, 1.0);
+      roughnessFactor = clamp(
+        mix(roughnessFactor, triRough, uRockRoughnessStrength)
+          + crevice * (0.12 + uRockCavityStrength * 0.16)
+          + cavity * (0.04 + uRockCavityStrength * 0.08)
+          + rockSlope * 0.04
+          - ridge * (0.03 + uRockRidgeStrength * 0.08)
+          + (1.0 - microRock) * (0.04 + uRockDetailStrength * 0.06),
+        0.42,
+        1.0
+      );
       `
     )
     .replace(
       '#include <emissivemap_fragment>',
       `
       #include <emissivemap_fragment>
-      totalEmissiveRadiance += vec3(0.017, 0.018, 0.019) * (ridge * 0.35 + (1.0 - crevice) * 0.11 + (microRock - 0.5) * 0.04);
+      totalEmissiveRadiance += vec3(0.018, 0.019, 0.02) * (
+        ridge * (0.12 + uRockRidgeStrength * 0.32)
+        + (1.0 - crevice) * 0.12
+        + (microRock - 0.5) * (0.04 + uRockDetailStrength * 0.05)
+      );
       `
     );
 
