@@ -446,7 +446,7 @@ const rockTriSettings = {
   roughnessStrength: 0.9,
   detailStrength: 0.34,
   cavityStrength: 0.2,
-  ridgeStrength: 0.12
+  ridgeStrength: 0.0
 };
 
 let terrainShader = null;
@@ -593,13 +593,11 @@ terrainMaterial.onBeforeCompile = (shader) => {
         + (macroRock - 0.5) * (0.12 + uRockDetailStrength * 0.12)
         + (microRock - 0.5) * (0.18 + uRockDetailStrength * 0.18);
       float cavityShade = crevice * (0.08 + uRockCavityStrength * 0.22) + cavity * (0.04 + uRockCavityStrength * 0.12);
-      float ridgeLift = ridge * (0.04 + uRockRidgeStrength * 0.18);
       float slopePresence = smoothstep(0.12, 0.9, rockSlope);
 
       diffuseColor.rgb *= mix(vec3(1.0), triAlbedoContrast, uRockAlbedoStrength);
       diffuseColor.rgb *= mix(vec3(0.92, 0.93, 0.95), rockTint, 0.42 + rockSlope * 0.42);
       diffuseColor.rgb *= 1.0 + albedoMicro * (0.55 + slopePresence * 0.45);
-      diffuseColor.rgb += vec3(ridgeLift);
       diffuseColor.rgb -= vec3(cavityShade);
       diffuseColor.rgb *= 1.0 - crevice * (0.08 + uRockCavityStrength * 0.18);
       `
@@ -625,8 +623,7 @@ terrainMaterial.onBeforeCompile = (shader) => {
       `
       #include <emissivemap_fragment>
       totalEmissiveRadiance += vec3(0.018, 0.019, 0.02) * (
-        ridge * (0.12 + uRockRidgeStrength * 0.32)
-        + (1.0 - crevice) * 0.12
+        (1.0 - crevice) * 0.12
         + (microRock - 0.5) * (0.04 + uRockDetailStrength * 0.05)
       );
       `
