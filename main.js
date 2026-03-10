@@ -27,20 +27,83 @@ controls.minDistance = 22;
 controls.maxDistance = 320;
 controls.maxPolarAngle = Math.PI * 0.47;
 
-const hemi = new THREE.HemisphereLight(0xb8ddf4, 0x31414d, 0.95);
+function createRadialTexture(inner, mid, outer) {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(
+    size * 0.5,
+    size * 0.5,
+    size * 0.08,
+    size * 0.5,
+    size * 0.5,
+    size * 0.5
+  );
+  gradient.addColorStop(0.0, inner);
+  gradient.addColorStop(0.35, mid);
+  gradient.addColorStop(1.0, outer);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const sunAnchor = new THREE.Vector3(18, 96, -315);
+const sunLookAt = new THREE.Vector3(0, 12, -32);
+const sunDirection = new THREE.Vector3();
+
+const hemi = new THREE.HemisphereLight(0xb8ddf4, 0x31414d, 0.55);
 scene.add(hemi);
 
-const sun = new THREE.DirectionalLight(0xfff1d0, 1.9);
-sun.position.set(-120, 145, 80);
+const sun = new THREE.DirectionalLight(0xffd7a0, 2.35);
+sun.position.copy(sunAnchor);
+sun.target.position.copy(sunLookAt);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -220;
-sun.shadow.camera.right = 220;
-sun.shadow.camera.top = 220;
-sun.shadow.camera.bottom = -220;
-sun.shadow.camera.near = 0.5;
-sun.shadow.camera.far = 520;
+sun.shadow.camera.left = -170;
+sun.shadow.camera.right = 170;
+sun.shadow.camera.top = 160;
+sun.shadow.camera.bottom = -160;
+sun.shadow.camera.near = 2;
+sun.shadow.camera.far = 720;
+sun.shadow.bias = -0.00025;
+sun.shadow.normalBias = 0.6;
 scene.add(sun);
+scene.add(sun.target);
+
+const sunDisk = new THREE.Mesh(
+  new THREE.SphereGeometry(8.8, 32, 24),
+  new THREE.MeshBasicMaterial({
+    color: 0xffd27f,
+    transparent: true,
+    opacity: 0.96,
+    fog: false
+  })
+);
+sunDisk.position.copy(sunAnchor);
+scene.add(sunDisk);
+
+const sunHalo = new THREE.Sprite(
+  new THREE.SpriteMaterial({
+    map: createRadialTexture('rgba(255,250,220,0.95)', 'rgba(255,194,104,0.52)', 'rgba(255,160,90,0.0)'),
+    color: 0xffd8ad,
+    transparent: true,
+    opacity: 0.76,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false
+  })
+);
+sunHalo.position.copy(sunAnchor);
+sunHalo.scale.set(120, 120, 1);
+scene.add(sunHalo);
+
+const sunGlow = new THREE.PointLight(0xffc98e, 1.4, 520, 2);
+sunGlow.position.copy(sunAnchor);
+scene.add(sunGlow);
 
 const sky = new THREE.Mesh(
   new THREE.SphereGeometry(900, 40, 24),
@@ -73,6 +136,62 @@ const sky = new THREE.Mesh(
   })
 );
 scene.add(sky);
+
+const sunBeamMaterials = [];
+
+function createSunBeam(start, end, radiusTop, radiusBottom, opacity) {
+  const direction = new THREE.Vector3().subVectors(end, start);
+  const length = direction.length();
+  const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uTime: { value: 0 },
+      uOpacity: { value: opacity },
+      uTint: { value: new THREE.Color(0xffd7ab) }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uOpacity;
+      uniform vec3 uTint;
+      varying vec2 vUv;
+      void main() {
+        float radial = 1.0 - abs(vUv.x - 0.5) * 2.0;
+        radial = pow(max(radial, 0.0), 1.7);
+        float along = smoothstep(0.02, 0.22, vUv.y) * smoothstep(1.0, 0.4, vUv.y);
+        float flow = 0.86 + 0.14 * sin((vUv.y * 21.0) - uTime * 0.9 + vUv.x * 5.0);
+        float alpha = radial * along * flow * uOpacity;
+        gl_FragColor = vec4(uTint, alpha);
+      }
+    `
+  });
+
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(radiusTop, radiusBottom, length, 28, 1, true), mat);
+  beam.position.copy(midpoint);
+  beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+
+  sunBeamMaterials.push(mat);
+  return beam;
+}
+
+const beams = new THREE.Group();
+beams.add(createSunBeam(sunAnchor, new THREE.Vector3(-26, 18, -120), 2.8, 28, 0.14));
+beams.add(createSunBeam(sunAnchor, new THREE.Vector3(0, 15, -55), 3.1, 34, 0.16));
+beams.add(createSunBeam(sunAnchor, new THREE.Vector3(30, 22, -25), 2.7, 26, 0.12));
+beams.add(createSunBeam(sunAnchor, new THREE.Vector3(8, 28, -80), 2.4, 20, 0.1));
+scene.add(beams);
 
 const terrainWidth = 260;
 const terrainDepth = 460;
@@ -205,12 +324,16 @@ const water = new THREE.Mesh(
     uniforms: {
       uTime: { value: 0 },
       uDeep: { value: new THREE.Color(0x13364b) },
-      uShallow: { value: new THREE.Color(0x3f8da8) }
+      uShallow: { value: new THREE.Color(0x3f8da8) },
+      uSunDir: { value: new THREE.Vector3(0.05, 0.32, -0.95) },
+      uSunTint: { value: new THREE.Color(0xffcc84) }
     },
     vertexShader: `
       uniform float uTime;
       varying float vWave;
       varying vec2 vUv;
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
       void main() {
         vUv = uv;
         vec3 p = position;
@@ -218,21 +341,44 @@ const water = new THREE.Mesh(
         float waveB = cos((p.y * 0.1) - uTime * 0.7) * 0.35;
         float waveC = sin((p.x * 0.15 + p.y * 0.2) + uTime * 0.9) * 0.28;
         p.z += waveA + waveB + waveC;
+
+        float dHx = cos((p.x * 0.15 + p.y * 0.2) + uTime * 0.9) * 0.28 * 0.15;
+        float dHy = cos((p.y * 0.055) + uTime * 1.25) * 0.75 * 0.055
+          - sin((p.y * 0.1) - uTime * 0.7) * 0.35 * 0.1
+          + cos((p.x * 0.15 + p.y * 0.2) + uTime * 0.9) * 0.28 * 0.2;
+
+        vec3 localN = normalize(vec3(-dHx, -dHy, 1.0));
+        vec4 worldPos = modelMatrix * vec4(p, 1.0);
+        vWorldPos = worldPos.xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * localN);
         vWave = p.z;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
       }
     `,
     fragmentShader: `
       uniform vec3 uDeep;
       uniform vec3 uShallow;
+      uniform vec3 uSunDir;
+      uniform vec3 uSunTint;
       varying float vWave;
       varying vec2 vUv;
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
       void main() {
         float edgeFade = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x);
         float mixF = clamp(vWave * 0.35 + 0.48, 0.0, 1.0);
         vec3 col = mix(uDeep, uShallow, mixF);
-        float sparkle = pow(max(0.0, sin(vUv.y * 180.0 + vWave * 3.2)), 14.0) * 0.08;
-        col += sparkle;
+
+        vec3 n = normalize(vWorldNormal);
+        vec3 viewDir = normalize(cameraPosition - vWorldPos);
+        vec3 lightDir = normalize(uSunDir);
+        float sparkleMask = pow(max(0.0, sin(vUv.y * 260.0 + vWave * 4.4)), 12.0);
+        float spec = pow(max(dot(reflect(-lightDir, n), viewDir), 0.0), 160.0);
+        float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.1);
+        float sparkle = spec * (0.25 + sparkleMask * 0.75);
+
+        col += uSunTint * sparkle * 1.3;
+        col += uSunTint * fresnel * 0.14;
         gl_FragColor = vec4(col, 0.84 * edgeFade + 0.06);
       }
     `
@@ -306,6 +452,35 @@ const mist = new THREE.Points(
 );
 scene.add(mist);
 
+const mistCool = new THREE.Color(0xc3dff1);
+const mistWarm = new THREE.Color(0xffce9a);
+
+const sunDustCount = 900;
+const sunDustGeo = new THREE.BufferGeometry();
+const sunDustPositions = new Float32Array(sunDustCount * 3);
+const sunDustSpeeds = new Float32Array(sunDustCount);
+for (let i = 0; i < sunDustCount; i += 1) {
+  const i3 = i * 3;
+  sunDustPositions[i3] = THREE.MathUtils.randFloatSpread(96);
+  sunDustPositions[i3 + 1] = THREE.MathUtils.randFloat(7, 58);
+  sunDustPositions[i3 + 2] = THREE.MathUtils.randFloat(-260, 45);
+  sunDustSpeeds[i] = THREE.MathUtils.randFloat(0.012, 0.045);
+}
+sunDustGeo.setAttribute('position', new THREE.BufferAttribute(sunDustPositions, 3));
+
+const sunDust = new THREE.Points(
+  sunDustGeo,
+  new THREE.PointsMaterial({
+    color: 0xffcc98,
+    size: 1.9,
+    transparent: true,
+    opacity: 0.18,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  })
+);
+scene.add(sunDust);
+
 const clock = new THREE.Clock();
 
 function animate() {
@@ -313,6 +488,9 @@ function animate() {
 
   water.material.uniforms.uTime.value = t;
   foam.material.uniforms.uTime.value = t;
+  for (const beamMat of sunBeamMaterials) {
+    beamMat.uniforms.uTime.value = t;
+  }
 
   if (terrainShader) {
     const insideMountain = Math.abs(camera.position.x) > 18;
@@ -331,8 +509,31 @@ function animate() {
   }
   mistPos.needsUpdate = true;
 
-  sun.position.x = -120 + Math.sin(t * 0.06) * 24;
-  sun.position.z = 80 + Math.cos(t * 0.05) * 16;
+  const warmShift = 0.16 + Math.sin(t * 0.33) * 0.06;
+  mist.material.color.lerpColors(mistCool, mistWarm, warmShift);
+
+  const sunDustPos = sunDust.geometry.attributes.position;
+  for (let i = 0; i < sunDustCount; i += 1) {
+    const idx = i * 3;
+    sunDustPos.array[idx] += sunDustSpeeds[i] * 0.15;
+    sunDustPos.array[idx + 2] += sunDustSpeeds[i] * 0.45;
+    if (sunDustPos.array[idx] > 55) sunDustPos.array[idx] = -55;
+    if (sunDustPos.array[idx + 2] > 60) sunDustPos.array[idx + 2] = -265;
+  }
+  sunDustPos.needsUpdate = true;
+
+  sun.position.set(
+    sunAnchor.x + Math.sin(t * 0.08) * 4.8,
+    sunAnchor.y + Math.sin(t * 0.11) * 1.7,
+    sunAnchor.z + Math.cos(t * 0.05) * 3.2
+  );
+  sunDisk.position.copy(sun.position);
+  sunHalo.position.copy(sun.position);
+  sunGlow.position.copy(sun.position);
+  sunHalo.material.opacity = 0.72 + Math.sin(t * 0.21) * 0.06;
+
+  sunDirection.subVectors(sun.position, sun.target.position).normalize();
+  water.material.uniforms.uSunDir.value.copy(sunDirection);
 
   controls.update();
   renderer.render(scene, camera);
