@@ -179,7 +179,7 @@ function createRockTextures(size = 512) {
   normalCtx.putImageData(normalData, 0, 0);
 
   const diffuseTex = new THREE.CanvasTexture(diffuseCanvas);
-  diffuseTex.colorSpace = THREE.SRGBColorSpace;
+  diffuseTex.colorSpace = THREE.NoColorSpace;
   const roughTex = new THREE.CanvasTexture(roughCanvas);
   const normalTex = new THREE.CanvasTexture(normalCanvas);
 
@@ -437,16 +437,24 @@ const terrainMaterial = new THREE.MeshStandardMaterial({
 });
 
 const rockTextures = createRockTextures(512);
-terrainMaterial.map = rockTextures.diffuse;
-terrainMaterial.roughnessMap = rockTextures.roughness;
-terrainMaterial.normalMap = rockTextures.normal;
-terrainMaterial.normalScale = new THREE.Vector2(1.15, 1.15);
+const rockTriSettings = {
+  scale: 0.115,
+  blendSharpness: 5.2,
+  albedoStrength: 0.84,
+  roughnessStrength: 0.88
+};
 
 let terrainShader = null;
 terrainMaterial.onBeforeCompile = (shader) => {
   shader.uniforms.uCutawayEnabled = { value: 0 };
   shader.uniforms.uCameraX = { value: 0 };
   shader.uniforms.uFjordCenterWidth = { value: 5.5 };
+  shader.uniforms.uRockDiffuse = { value: rockTextures.diffuse };
+  shader.uniforms.uRockRoughness = { value: rockTextures.roughness };
+  shader.uniforms.uRockScale = { value: rockTriSettings.scale };
+  shader.uniforms.uRockBlendSharpness = { value: rockTriSettings.blendSharpness };
+  shader.uniforms.uRockAlbedoStrength = { value: rockTriSettings.albedoStrength };
+  shader.uniforms.uRockRoughnessStrength = { value: rockTriSettings.roughnessStrength };
 
   shader.vertexShader = shader.vertexShader
     .replace(
@@ -475,6 +483,12 @@ terrainMaterial.onBeforeCompile = (shader) => {
       uniform float uCutawayEnabled;
       uniform float uCameraX;
       uniform float uFjordCenterWidth;
+      uniform sampler2D uRockDiffuse;
+      uniform sampler2D uRockRoughness;
+      uniform float uRockScale;
+      uniform float uRockBlendSharpness;
+      uniform float uRockAlbedoStrength;
+      uniform float uRockRoughnessStrength;
       varying vec3 vWorldPos;
       varying vec3 vWorldNormal;
 
@@ -505,6 +519,11 @@ terrainMaterial.onBeforeCompile = (shader) => {
         }
         return value;
       }
+
+      vec3 triplanarWeights(vec3 n, float sharpness) {
+        vec3 w = pow(abs(n), vec3(sharpness));
+        return w / max(w.x + w.y + w.z, 0.0001);
+      }
       `
     )
     .replace(
@@ -523,7 +542,27 @@ terrainMaterial.onBeforeCompile = (shader) => {
       '#include <color_fragment>',
       `
       #include <color_fragment>
-      float rockSlope = clamp(1.0 - abs(normalize(vWorldNormal).y), 0.0, 1.0);
+      vec3 nWorld = normalize(vWorldNormal);
+      float rockSlope = clamp(1.0 - abs(nWorld.y), 0.0, 1.0);
+
+      vec3 triW = triplanarWeights(nWorld, uRockBlendSharpness);
+      float sx = nWorld.x < 0.0 ? -1.0 : 1.0;
+      float sy = nWorld.y < 0.0 ? -1.0 : 1.0;
+      float sz = nWorld.z < 0.0 ? -1.0 : 1.0;
+      vec2 triUvX = vWorldPos.zy * uRockScale * vec2(sx, 1.0);
+      vec2 triUvY = vWorldPos.xz * uRockScale * vec2(sy, 1.0);
+      vec2 triUvZ = vWorldPos.xy * uRockScale * vec2(-sz, 1.0);
+
+      vec3 triColX = texture2D(uRockDiffuse, triUvX).rgb;
+      vec3 triColY = texture2D(uRockDiffuse, triUvY).rgb;
+      vec3 triColZ = texture2D(uRockDiffuse, triUvZ).rgb;
+      vec3 triAlbedo = triColX * triW.x + triColY * triW.y + triColZ * triW.z;
+      vec3 triAlbedoContrast = (triAlbedo - 0.5) * 1.3 + 0.5;
+
+      float triRoughX = texture2D(uRockRoughness, triUvX).r;
+      float triRoughY = texture2D(uRockRoughness, triUvY).r;
+      float triRoughZ = texture2D(uRockRoughness, triUvZ).r;
+      float triRough = triRoughX * triW.x + triRoughY * triW.y + triRoughZ * triW.z;
 
       float macroRock = fbm(vWorldPos.xz * 0.045);
       float detailRock = fbm(vWorldPos.xz * 0.28 + vec2(macroRock * 3.2, macroRock * 1.6));
@@ -538,6 +577,7 @@ terrainMaterial.onBeforeCompile = (shader) => {
       vec3 rockTint = mix(rockCool, rockDark, crevice);
 
       float albedoMicro = (ridge * 0.22) - (crevice * 0.29) + (macroRock - 0.5) * 0.14 + (microRock - 0.5) * 0.22;
+      diffuseColor.rgb *= mix(vec3(1.0), triAlbedoContrast, uRockAlbedoStrength);
       diffuseColor.rgb *= mix(vec3(0.92, 0.93, 0.95), rockTint, 0.5 + rockSlope * 0.35);
       diffuseColor.rgb *= (0.9 + albedoMicro);
       diffuseColor.rgb += ridge * 0.09;
@@ -549,7 +589,7 @@ terrainMaterial.onBeforeCompile = (shader) => {
       '#include <roughnessmap_fragment>',
       `
       #include <roughnessmap_fragment>
-      roughnessFactor = clamp(roughnessFactor + crevice * 0.2 + cavity * 0.08 + rockSlope * 0.05 - ridge * 0.1 + (1.0 - microRock) * 0.07, 0.46, 1.0);
+      roughnessFactor = clamp(mix(roughnessFactor, triRough, uRockRoughnessStrength) + crevice * 0.2 + cavity * 0.08 + rockSlope * 0.05 - ridge * 0.1 + (1.0 - microRock) * 0.07, 0.46, 1.0);
       `
     )
     .replace(
