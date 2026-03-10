@@ -51,6 +51,150 @@ function createRadialTexture(inner, mid, outer) {
   return tex;
 }
 
+function createRockTextures(size = 512) {
+  const diffuseCanvas = document.createElement('canvas');
+  diffuseCanvas.width = size;
+  diffuseCanvas.height = size;
+  const diffuseCtx = diffuseCanvas.getContext('2d');
+  const diffuseData = diffuseCtx.createImageData(size, size);
+
+  const roughCanvas = document.createElement('canvas');
+  roughCanvas.width = size;
+  roughCanvas.height = size;
+  const roughCtx = roughCanvas.getContext('2d');
+  const roughData = roughCtx.createImageData(size, size);
+
+  const normalCanvas = document.createElement('canvas');
+  normalCanvas.width = size;
+  normalCanvas.height = size;
+  const normalCtx = normalCanvas.getContext('2d');
+  const normalData = normalCtx.createImageData(size, size);
+
+  const heights = new Float32Array(size * size);
+
+  const fract = (v) => v - Math.floor(v);
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+  function hash2(x, y) {
+    return fract(Math.sin(x * 127.1 + y * 311.7) * 43758.5453123);
+  }
+
+  function noise2(x, y) {
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    const fx = x - ix;
+    const fy = y - iy;
+    const ux = fx * fx * (3 - 2 * fx);
+    const uy = fy * fy * (3 - 2 * fy);
+
+    const a = hash2(ix, iy);
+    const b = hash2(ix + 1, iy);
+    const c = hash2(ix, iy + 1);
+    const d = hash2(ix + 1, iy + 1);
+
+    const x1 = a + (b - a) * ux;
+    const x2 = c + (d - c) * ux;
+    return x1 + (x2 - x1) * uy;
+  }
+
+  function fbm(x, y, octaves = 5) {
+    let value = 0;
+    let amp = 0.5;
+    let freq = 1;
+    for (let i = 0; i < octaves; i += 1) {
+      value += noise2(x * freq, y * freq) * amp;
+      freq *= 2.05;
+      amp *= 0.5;
+    }
+    return value;
+  }
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const u = x / size;
+      const v = y / size;
+
+      const macro = fbm(u * 6.0, v * 6.0, 4);
+      const detail = fbm(u * 21.0 + macro * 2.2, v * 21.0 - macro * 1.6, 4);
+      const grain = fbm(u * 64.0, v * 64.0, 3);
+      const strata = Math.sin(v * 62.0 + macro * 9.5 + detail * 5.2) * 0.5 + 0.5;
+      const crack = Math.pow(Math.max(0, detail - 0.6) / 0.4, 1.8);
+
+      const h = clamp01(0.28 + macro * 0.38 + strata * 0.24 - crack * 0.26 + (grain - 0.5) * 0.18);
+      heights[y * size + x] = h;
+
+      const r = clamp01(0.34 + h * 0.46 + strata * 0.07 - crack * 0.15);
+      const g = clamp01(0.36 + h * 0.44 + macro * 0.06 - crack * 0.16);
+      const b = clamp01(0.39 + h * 0.41 + detail * 0.04 - crack * 0.18);
+      const rough = clamp01(0.6 + crack * 0.3 + (1 - strata) * 0.1 - grain * 0.05);
+
+      const idx = (y * size + x) * 4;
+      diffuseData.data[idx] = Math.round(r * 255);
+      diffuseData.data[idx + 1] = Math.round(g * 255);
+      diffuseData.data[idx + 2] = Math.round(b * 255);
+      diffuseData.data[idx + 3] = 255;
+
+      const roughByte = Math.round(rough * 255);
+      roughData.data[idx] = roughByte;
+      roughData.data[idx + 1] = roughByte;
+      roughData.data[idx + 2] = roughByte;
+      roughData.data[idx + 3] = 255;
+    }
+  }
+
+  const strength = 5.4;
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const xl = (x - 1 + size) % size;
+      const xr = (x + 1) % size;
+      const yd = (y - 1 + size) % size;
+      const yu = (y + 1) % size;
+      const hL = heights[y * size + xl];
+      const hR = heights[y * size + xr];
+      const hD = heights[yd * size + x];
+      const hU = heights[yu * size + x];
+
+      const dx = (hR - hL) * strength;
+      const dy = (hU - hD) * strength;
+      let nx = -dx;
+      let ny = -dy;
+      let nz = 1;
+      const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      nx /= len;
+      ny /= len;
+      nz /= len;
+
+      const idx = (y * size + x) * 4;
+      normalData.data[idx] = Math.round((nx * 0.5 + 0.5) * 255);
+      normalData.data[idx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+      normalData.data[idx + 2] = Math.round((nz * 0.5 + 0.5) * 255);
+      normalData.data[idx + 3] = 255;
+    }
+  }
+
+  diffuseCtx.putImageData(diffuseData, 0, 0);
+  roughCtx.putImageData(roughData, 0, 0);
+  normalCtx.putImageData(normalData, 0, 0);
+
+  const diffuseTex = new THREE.CanvasTexture(diffuseCanvas);
+  diffuseTex.colorSpace = THREE.SRGBColorSpace;
+  const roughTex = new THREE.CanvasTexture(roughCanvas);
+  const normalTex = new THREE.CanvasTexture(normalCanvas);
+
+  for (const tex of [diffuseTex, roughTex, normalTex]) {
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(8, 14);
+    tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  }
+
+  return {
+    diffuse: diffuseTex,
+    roughness: roughTex,
+    normal: normalTex
+  };
+}
+
 const sunAnchor = new THREE.Vector3(18, 96, -315);
 const sunLookAt = new THREE.Vector3(0, 12, -32);
 const sunDirection = new THREE.Vector3();
@@ -261,6 +405,12 @@ const terrainMaterial = new THREE.MeshStandardMaterial({
   flatShading: false
 });
 
+const rockTextures = createRockTextures(512);
+terrainMaterial.map = rockTextures.diffuse;
+terrainMaterial.roughnessMap = rockTextures.roughness;
+terrainMaterial.normalMap = rockTextures.normal;
+terrainMaterial.normalScale = new THREE.Vector2(0.85, 0.85);
+
 let terrainShader = null;
 terrainMaterial.onBeforeCompile = (shader) => {
   shader.uniforms.uCutawayEnabled = { value: 0 };
@@ -273,6 +423,7 @@ terrainMaterial.onBeforeCompile = (shader) => {
       `
       #include <common>
       varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
       `
     )
     .replace(
@@ -281,6 +432,7 @@ terrainMaterial.onBeforeCompile = (shader) => {
       #include <begin_vertex>
       vec4 worldPos = modelMatrix * vec4(transformed, 1.0);
       vWorldPos = worldPos.xyz;
+      vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);
       `
     );
 
@@ -293,6 +445,35 @@ terrainMaterial.onBeforeCompile = (shader) => {
       uniform float uCameraX;
       uniform float uFjordCenterWidth;
       varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
+
+      float hash21(vec2 p) {
+        p = fract(p * vec2(123.34, 345.45));
+        p += dot(p, p + 34.345);
+        return fract(p.x * p.y);
+      }
+
+      float noise2(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        float a = hash21(i);
+        float b = hash21(i + vec2(1.0, 0.0));
+        float c = hash21(i + vec2(0.0, 1.0));
+        float d = hash21(i + vec2(1.0, 1.0));
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+      }
+
+      float fbm(vec2 p) {
+        float value = 0.0;
+        float amp = 0.5;
+        for (int i = 0; i < 4; i++) {
+          value += noise2(p) * amp;
+          p = p * 2.03 + vec2(31.7, 19.2);
+          amp *= 0.5;
+        }
+        return value;
+      }
       `
     )
     .replace(
@@ -305,6 +486,34 @@ terrainMaterial.onBeforeCompile = (shader) => {
         bool farFromCenter = abs(vWorldPos.x) > uFjordCenterWidth;
         if (camSide != 0.0 && fragSide == camSide && farFromCenter) discard;
       }
+      `
+    )
+    .replace(
+      '#include <color_fragment>',
+      `
+      #include <color_fragment>
+      float rockSlope = clamp(1.0 - abs(normalize(vWorldNormal).y), 0.0, 1.0);
+
+      float macroRock = fbm(vWorldPos.xz * 0.045);
+      float detailRock = fbm(vWorldPos.xz * 0.28 + vec2(macroRock * 3.2, macroRock * 1.6));
+      float strata = sin(vWorldPos.y * 0.82 + macroRock * 7.2 + detailRock * 2.1) * 0.5 + 0.5;
+      float crevice = smoothstep(0.53, 0.9, detailRock) * (0.38 + rockSlope * 0.9);
+      float ridge = smoothstep(0.56, 0.93, strata) * (0.45 + rockSlope * 0.6);
+
+      vec3 rockCool = vec3(0.79, 0.82, 0.85);
+      vec3 rockDark = vec3(0.46, 0.49, 0.52);
+      vec3 rockTint = mix(rockCool, rockDark, crevice);
+
+      diffuseColor.rgb *= mix(vec3(0.9, 0.92, 0.95), rockTint, 0.36 + rockSlope * 0.42);
+      diffuseColor.rgb += ridge * 0.055;
+      diffuseColor.rgb *= 1.0 - crevice * 0.16;
+      `
+    )
+    .replace(
+      '#include <roughnessmap_fragment>',
+      `
+      #include <roughnessmap_fragment>
+      roughnessFactor = clamp(roughnessFactor + crevice * 0.16 + rockSlope * 0.08 - ridge * 0.06, 0.56, 1.0);
       `
     );
 
